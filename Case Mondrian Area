@@ -1,0 +1,628 @@
+# =====================================================
+# MONDRIAN CP:
+# Municipality Mondrian with 5 bins
+# + combined plots
+# =====================================================
+
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+library(scales)
+library(patchwork)
+
+# =====================================================
+# Parameters
+# =====================================================
+
+B <- 1000
+alpha <- 0.1
+
+# =====================================================
+# Storage
+# =====================================================
+
+kommune_results <- vector("list", B)
+
+# =====================================================
+# Loop
+# =====================================================
+
+for(i in 1:B){
+  
+  set.seed(i)
+  
+  # -------------------------------------------------
+  # Split
+  # -------------------------------------------------
+  
+  n <- nrow(cph_data)
+  
+  train_idx <- sample(
+    1:n,
+    size = floor(0.6*n)
+  )
+  
+  remaining_idx <- setdiff(
+    1:n,
+    train_idx
+  )
+  
+  cal_idx <- sample(
+    remaining_idx,
+    size = floor(0.5*length(remaining_idx))
+  )
+  
+  test_idx <- setdiff(
+    remaining_idx,
+    cal_idx
+  )
+  
+  cph_train <- cph_data[train_idx, ]
+  cph_cal   <- cph_data[cal_idx, ]
+  cph_test  <- cph_data[test_idx, ]
+  
+  # -------------------------------------------------
+  # RF model
+  # -------------------------------------------------
+  
+  rf_model <- randomForest(
+    
+    log_KOEBESUM ~ .,
+    
+    data =
+      cph_train %>%
+      select(-KOEBESUM),
+    
+    ntree = 500
+  )
+  
+  # -------------------------------------------------
+  # Calibration predictions
+  # -------------------------------------------------
+  
+  cal_pred <- predict(
+    rf_model,
+    newdata = cph_cal
+  )
+  
+  residuals <- abs(
+    cph_cal$log_KOEBESUM -
+      cal_pred
+  )
+  
+  # -------------------------------------------------
+  # Municipality bins
+  # -------------------------------------------------
+  
+  kommune_prices <-
+    
+    cph_cal %>%
+    
+    group_by(KOMMUNE_NAVN) %>%
+    
+    summarise(
+      mean_price = mean(KOEBESUM),
+      .groups = "drop"
+    ) %>%
+    
+    arrange(mean_price) %>%
+    
+    mutate(
+      kommune_bin =
+        ntile(mean_price, 5)
+    )
+  
+  # -------------------------------------------------
+  # Attach bins
+  # -------------------------------------------------
+  
+  cph_cal <-
+    
+    cph_cal %>%
+    
+    left_join(
+      kommune_prices %>%
+        select(
+          KOMMUNE_NAVN,
+          kommune_bin
+        ),
+      
+      by = "KOMMUNE_NAVN"
+    )
+  
+  cph_test <-
+    
+    cph_test %>%
+    
+    left_join(
+      kommune_prices %>%
+        select(
+          KOMMUNE_NAVN,
+          kommune_bin
+        ),
+      
+      by = "KOMMUNE_NAVN"
+    )
+  
+  # -------------------------------------------------
+  # Residuals
+  # -------------------------------------------------
+  
+  cph_cal$residual <- residuals
+  
+  # -------------------------------------------------
+  # Mondrian quantiles
+  # -------------------------------------------------
+  
+  kommune_qhat <-
+    
+    cph_cal %>%
+    
+    group_by(kommune_bin) %>%
+    
+    summarise(
+      
+      qhat =
+        quantile(
+          residual,
+          
+          probs =
+            ceiling(
+              (n()+1)*(1-alpha)
+            ) / n()
+        ),
+      
+      .groups = "drop"
+    )
+  
+  # -------------------------------------------------
+  # Attach qhat
+  # -------------------------------------------------
+  
+  cph_test <-
+    
+    cph_test %>%
+    
+    left_join(
+      kommune_qhat,
+      by = "kommune_bin"
+    )
+  
+  # -------------------------------------------------
+  # Test predictions
+  # -------------------------------------------------
+  
+  test_pred <- predict(
+    rf_model,
+    newdata = cph_test
+  )
+  
+  # -------------------------------------------------
+  # Results dataframe
+  # -------------------------------------------------
+  
+  kommune_df <- data.frame(
+    
+    faktisk =
+      exp(cph_test$log_KOEBESUM),
+    
+    lower =
+      exp(test_pred - cph_test$qhat),
+    
+    upper =
+      exp(test_pred + cph_test$qhat),
+    
+    covered =
+      cph_test$log_KOEBESUM >=
+      (test_pred - cph_test$qhat) &
+      
+      cph_test$log_KOEBESUM <=
+      (test_pred + cph_test$qhat),
+    
+    width =
+      exp(test_pred + cph_test$qhat) -
+      exp(test_pred - cph_test$qhat),
+    
+    KOMMUNE_NAVN =
+      cph_test$KOMMUNE_NAVN,
+    
+    kommune_bin =
+      cph_test$kommune_bin,
+    
+    cph_salgsaar =
+      cph_test$cph_salgsaar,
+    
+    replication = i
+  )
+  
+  kommune_results[[i]] <- kommune_df
+  
+  cat("Replication:", i, "\n")
+}
+
+# =====================================================
+# Merge
+# =====================================================
+
+kommune_only <- bind_rows(
+  kommune_results
+)
+
+# =====================================================
+# Relative width
+# =====================================================
+
+kommune_only <-
+  
+  kommune_only %>%
+  
+  mutate(
+    rel_width = width / faktisk
+  )
+
+# =====================================================
+# PRICE BINS
+# =====================================================
+
+breaks_price <- quantile(
+  kommune_only$faktisk / 1e6,
+  probs = seq(0,1,length.out = 11),
+  na.rm = TRUE
+)
+
+kommune_only <-
+  
+  kommune_only %>%
+  
+  mutate(
+    
+    price_bin =
+      cut(
+        faktisk / 1e6,
+        breaks = breaks_price,
+        include.lowest = TRUE
+      )
+  )
+
+# =====================================================
+# YEAR PLOT
+# =====================================================
+
+coverage_year <-
+  
+  kommune_only %>%
+  
+  group_by(cph_salgsaar) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  )
+
+scale_factor_year <-
+  
+  max(coverage_year$coverage) /
+  max(coverage_year$mean_width)
+
+p_year <-
+  
+  ggplot() +
+  
+  geom_line(
+    data = coverage_year,
+    
+    aes(
+      x = cph_salgsaar,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_year,
+    
+    aes(
+      x = cph_salgsaar,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_line(
+    data = coverage_year,
+    
+    aes(
+      x = cph_salgsaar,
+      y = mean_width * scale_factor_year,
+      color = "Interval width"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_year,
+    
+    aes(
+      x = cph_salgsaar,
+      y = mean_width * scale_factor_year,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    linetype = "dashed"
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_year,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  labs(
+    title = "Mondrian CP (5 municipality bins): by year",
+    x = "Sale year",
+    color = NULL
+  ) +
+  
+  theme_minimal()
+
+# =====================================================
+# PRICE PLOT
+# =====================================================
+
+coverage_price <-
+  
+  kommune_only %>%
+  
+  group_by(price_bin) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  )
+
+scale_factor_price <-
+  
+  max(coverage_price$coverage) /
+  max(coverage_price$mean_width)
+
+p_price <-
+  
+  ggplot() +
+  
+  geom_line(
+    data = coverage_price,
+    
+    aes(
+      x = price_bin,
+      y = coverage,
+      group = 1,
+      color = "Coverage"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_price,
+    
+    aes(
+      x = price_bin,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_line(
+    data = coverage_price,
+    
+    aes(
+      x = price_bin,
+      y = mean_width * scale_factor_price,
+      group = 1,
+      color = "Interval width"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_price,
+    
+    aes(
+      x = price_bin,
+      y = mean_width * scale_factor_price,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    linetype = "dashed"
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_price,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  labs(
+    title = "Mondrian CP (5 municipality bins): by price",
+    x = "Price interval (million DKK)",
+    color = NULL
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      )
+  )
+
+# =====================================================
+# MUNICIPALITY PLOT
+# =====================================================
+
+coverage_area <-
+  
+  kommune_only %>%
+  
+  group_by(KOMMUNE_NAVN) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  ) %>%
+  
+  arrange(desc(coverage))
+
+coverage_area$KOMMUNE_NAVN <-
+  
+  factor(
+    coverage_area$KOMMUNE_NAVN,
+    levels = coverage_area$KOMMUNE_NAVN
+  )
+
+scale_factor_area <-
+  
+  max(coverage_area$coverage) /
+  max(coverage_area$mean_width)
+
+p_area <-
+  
+  ggplot() +
+  
+  geom_line(
+    data = coverage_area,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = coverage,
+      group = 1,
+      color = "Coverage"
+    ),
+    
+    linewidth = 0.8
+  ) +
+  
+  geom_point(
+    data = coverage_area,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_point(
+    data = coverage_area,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = mean_width * scale_factor_area,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    linetype = "dashed"
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_area,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  coord_flip() +
+  
+  labs(
+    title = "Mondrian CP (5 municipality bins): by municipality",
+    x = NULL,
+    color = NULL
+  ) +
+  
+  theme_minimal()
+
+# =====================================================
+# Combine plots
+# =====================================================
+
+p_year | p_price | p_area
