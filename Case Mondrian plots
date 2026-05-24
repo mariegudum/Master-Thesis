@@ -1,0 +1,462 @@
+# =========================================================
+# Libraries
+# =========================================================
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# =========================================================
+# Price bins
+# =========================================================
+
+breaks_price <- quantile(
+  all_results_cp$faktisk / 1e6,
+  probs = seq(0,1,length.out = 11),
+  na.rm = TRUE
+)
+
+all_results_cp <-
+  
+  all_results_cp %>%
+  
+  mutate(
+    
+    price_bin = cut(
+      faktisk / 1e6,
+      breaks = breaks_price,
+      include.lowest = TRUE
+    )
+  )
+
+# =========================================================
+# Coverage + width by year
+# =========================================================
+
+coverage_year_cp <-
+  
+  all_results_cp %>%
+  
+  group_by(cph_salgsaar) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  )
+
+scale_factor_year_cp <-
+  max(coverage_year_cp$coverage) /
+  max(coverage_year_cp$mean_width)
+
+p_year_combined_cp <-
+  
+  ggplot() +
+  
+  # -------------------------------------------------
+  # Coverage
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_year_cp,
+    
+    aes(
+      x = cph_salgsaar,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_year_cp,
+    
+    aes(
+      x = cph_salgsaar,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    color = "black",
+    linetype = "dashed"
+  ) +
+  
+  # -------------------------------------------------
+  # Width
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_year_cp,
+    
+    aes(
+      x = cph_salgsaar,
+      y = mean_width * scale_factor_year_cp,
+      color = "Interval width"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_year_cp,
+    
+    aes(
+      x = cph_salgsaar,
+      y = mean_width * scale_factor_year_cp,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_year_cp,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  labs(
+    title = "Split conformal prediction: coverage and width by year",
+    x = "Sale year",
+    color = NULL
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    
+    legend.position = "top",
+    
+    axis.title.y.left = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.title.y.right = element_text(
+      color = "darkgreen"
+    ),
+    
+    axis.text.y.left = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.text.y.right = element_text(
+      color = "darkgreen"
+    )
+  )
+
+p_year_combined_cp
+
+# =========================================================
+# Coverage + width by price
+# =========================================================
+
+coverage_price_cp <-
+  
+  all_results_cp %>%
+  
+  group_by(price_bin) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  )
+
+scale_factor_price_cp <-
+  max(coverage_price_cp$coverage) /
+  max(coverage_price_cp$mean_width)
+
+p_price_combined_cp <-
+  
+  ggplot() +
+  
+  # -------------------------------------------------
+  # Coverage
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_price_cp,
+    
+    aes(
+      x = price_bin,
+      y = coverage,
+      group = 1,
+      color = "Coverage"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_price_cp,
+    
+    aes(
+      x = price_bin,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    color = "black",
+    linetype = "dashed"
+  ) +
+  
+  # -------------------------------------------------
+  # Width
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_price_cp,
+    
+    aes(
+      x = price_bin,
+      y = mean_width * scale_factor_price_cp,
+      group = 1,
+      color = "Interval width"
+    ),
+    
+    linewidth = 1
+  ) +
+  
+  geom_point(
+    data = coverage_price_cp,
+    
+    aes(
+      x = price_bin,
+      y = mean_width * scale_factor_price_cp,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_price_cp,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  labs(
+    title = "Split conformal prediction: coverage and width by price",
+    x = "Price interval (million DKK)",
+    color = NULL
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    
+    legend.position = "top",
+    
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    
+    axis.title.y.left = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.title.y.right = element_text(
+      color = "darkgreen"
+    ),
+    
+    axis.text.y.left = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.text.y.right = element_text(
+      color = "darkgreen"
+    )
+  )
+
+p_price_combined_cp
+
+# =========================================================
+# Coverage + width by municipality
+# =========================================================
+
+coverage_area_cp <-
+  
+  all_results_cp %>%
+  
+  group_by(KOMMUNE_NAVN) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  
+  filter(n > 50) %>%
+  
+  arrange(desc(coverage)) %>%
+  
+  mutate(
+    
+    KOMMUNE_NAVN =
+      factor(
+        KOMMUNE_NAVN,
+        levels = KOMMUNE_NAVN
+      )
+  )
+
+scale_factor_area_cp <-
+  max(coverage_area_cp$coverage) /
+  max(coverage_area_cp$mean_width)
+
+p_area_combined_cp <-
+  
+  ggplot() +
+  
+  # -------------------------------------------------
+  # Coverage
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_area_cp,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = coverage,
+      group = 1,
+      color = "Coverage"
+    ),
+    
+    linewidth = 0.7
+  ) +
+  
+  geom_point(
+    data = coverage_area_cp,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    color = "black",
+    linetype = "dashed"
+  ) +
+  
+  # -------------------------------------------------
+  # Width
+  # -------------------------------------------------
+  
+  geom_point(
+    data = coverage_area_cp,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = mean_width * scale_factor_area_cp,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_area_cp,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  coord_flip() +
+  
+  labs(
+    title = "Split conformal prediction: coverage and width by municipality",
+    x = NULL,
+    color = NULL
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    
+    legend.position = "top",
+    
+    axis.title.x.bottom = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.title.x.top = element_text(
+      color = "darkgreen"
+    ),
+    
+    axis.text.x.bottom = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.text.x.top = element_text(
+      color = "darkgreen"
+    )
+  )
+
+p_area_combined_cp
