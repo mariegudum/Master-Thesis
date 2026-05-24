@@ -250,3 +250,122 @@ p_mondrian_pred <-
 # =====================================================
 
 p_mondrian_kommune | p_mondrian_pred
+
+
+# =====================================================
+# Coverage + width by year
+# =====================================================
+
+coverage_year_mondrian <-
+  
+  all_cp_results %>%
+  
+  group_by(cph_salgsaar) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  )
+
+scale_factor_year <-
+  max(coverage_year_mondrian$coverage) /
+  max(coverage_year_mondrian$mean_width)
+
+p_mondrian_year <-
+  
+  ggplot() +
+  
+  # -------------------------------------------------
+  # Coverage
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_year_mondrian,
+    
+    aes(
+      x = cph_salgsaar,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    linewidth = 0.8
+  ) +
+  
+  geom_point(
+    data = coverage_year_mondrian,
+    
+    aes(
+      x = cph_salgsaar,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    linetype = "dashed"
+  ) +
+  
+  # -------------------------------------------------
+  # Width
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_year_mondrian,
+    
+    aes(
+      x = cph_salgsaar,
+      y = mean_width * scale_factor_year,
+      color = "Interval width"
+    ),
+    
+    linewidth = 0.8
+  ) +
+  
+  geom_point(
+    data = coverage_year_mondrian,
+    
+    aes(
+      x = cph_salgsaar,
+      y = mean_width * scale_factor_year,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_year,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = scales::label_number(scale = 1e-6)
+    )
+  ) +
+  
+  labs(
+    title = "Mondrian CP: sale year",
+    x = "Sale year",
+    color = NULL
+  ) +
+  
+  theme_minimal()
+
+p_mondrian_year
