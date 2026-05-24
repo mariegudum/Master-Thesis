@@ -1,0 +1,379 @@
+# =====================================================
+# MONDRIAN CP:
+# Evaluation on ORIGINAL municipalities and price bins
+# =====================================================
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(patchwork)
+
+# =====================================================
+# 1. MUNICIPALITY MONDRIAN
+# =====================================================
+
+kommune_only <-
+  
+  all_cp_results %>%
+  
+  filter(
+    method == "Mondrian CP - Kommune"
+  )
+
+# -----------------------------------------------------
+# Coverage + width by ORIGINAL municipality
+# -----------------------------------------------------
+
+coverage_area_mondrian <-
+  
+  kommune_only %>%
+  
+  group_by(KOMMUNE_NAVN) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  ) %>%
+  
+  arrange(desc(coverage))
+
+coverage_area_mondrian$KOMMUNE_NAVN <-
+  
+  factor(
+    coverage_area_mondrian$KOMMUNE_NAVN,
+    levels = coverage_area_mondrian$KOMMUNE_NAVN
+  )
+
+scale_factor_area_mondrian <-
+  
+  max(
+    coverage_area_mondrian$coverage,
+    na.rm = TRUE
+  ) /
+  
+  max(
+    coverage_area_mondrian$mean_width,
+    na.rm = TRUE
+  )
+
+p_mondrian_area <-
+  
+  ggplot() +
+  
+  # -------------------------------------------------
+  # Coverage
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_area_mondrian,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = coverage,
+      group = 1,
+      color = "Coverage"
+    ),
+    
+    linewidth = 0.8
+  ) +
+  
+  geom_point(
+    data = coverage_area_mondrian,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    linetype = "dashed"
+  ) +
+  
+  # -------------------------------------------------
+  # Width
+  # -------------------------------------------------
+  
+  geom_point(
+    data = coverage_area_mondrian,
+    
+    aes(
+      x = KOMMUNE_NAVN,
+      y = mean_width * scale_factor_area_mondrian,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  # -------------------------------------------------
+  # Colors
+  # -------------------------------------------------
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  # -------------------------------------------------
+  # Axes
+  # -------------------------------------------------
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_area_mondrian,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  coord_flip() +
+  
+  labs(
+    title = "Mondrian CP: coverage and width by municipality",
+    x = NULL,
+    color = NULL
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    
+    legend.position = "top",
+    
+    axis.title.x.bottom = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.title.x.top = element_text(
+      color = "darkgreen"
+    ),
+    
+    axis.text.x.bottom = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.text.x.top = element_text(
+      color = "darkgreen"
+    )
+  )
+
+p_mondrian_area
+
+# =====================================================
+# 2. PREDICTION-BIN MONDRIAN
+# =====================================================
+
+pred_only <-
+  
+  all_cp_results %>%
+  
+  filter(
+    method == "Mondrian CP - Prediction"
+  )
+
+# -----------------------------------------------------
+# Create ORIGINAL price bins
+# -----------------------------------------------------
+
+breaks_price <- quantile(
+  pred_only$faktisk / 1e6,
+  probs = seq(0,1,length.out = 11),
+  na.rm = TRUE
+)
+
+pred_only <-
+  
+  pred_only %>%
+  
+  mutate(
+    
+    price_bin = cut(
+      faktisk / 1e6,
+      breaks = breaks_price,
+      include.lowest = TRUE
+    )
+  )
+
+# -----------------------------------------------------
+# Coverage + width by ORIGINAL price bins
+# -----------------------------------------------------
+
+coverage_price_mondrian <-
+  
+  pred_only %>%
+  
+  group_by(price_bin) %>%
+  
+  summarise(
+    coverage = mean(covered),
+    mean_width = mean(width),
+    .groups = "drop"
+  )
+
+scale_factor_price_mondrian <-
+  
+  max(
+    coverage_price_mondrian$coverage,
+    na.rm = TRUE
+  ) /
+  
+  max(
+    coverage_price_mondrian$mean_width,
+    na.rm = TRUE
+  )
+
+p_mondrian_price <-
+  
+  ggplot() +
+  
+  # -------------------------------------------------
+  # Coverage
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_price_mondrian,
+    
+    aes(
+      x = price_bin,
+      y = coverage,
+      group = 1,
+      color = "Coverage"
+    ),
+    
+    linewidth = 0.8
+  ) +
+  
+  geom_point(
+    data = coverage_price_mondrian,
+    
+    aes(
+      x = price_bin,
+      y = coverage,
+      color = "Coverage"
+    ),
+    
+    size = 2
+  ) +
+  
+  geom_hline(
+    yintercept = 0.9,
+    linetype = "dashed"
+  ) +
+  
+  # -------------------------------------------------
+  # Width
+  # -------------------------------------------------
+  
+  geom_line(
+    data = coverage_price_mondrian,
+    
+    aes(
+      x = price_bin,
+      y = mean_width * scale_factor_price_mondrian,
+      group = 1,
+      color = "Interval width"
+    ),
+    
+    linewidth = 0.8
+  ) +
+  
+  geom_point(
+    data = coverage_price_mondrian,
+    
+    aes(
+      x = price_bin,
+      y = mean_width * scale_factor_price_mondrian,
+      color = "Interval width"
+    ),
+    
+    size = 2
+  ) +
+  
+  # -------------------------------------------------
+  # Colors
+  # -------------------------------------------------
+  
+  scale_color_manual(
+    values = c(
+      "Coverage" = "darkblue",
+      "Interval width" = "darkgreen"
+    )
+  ) +
+  
+  # -------------------------------------------------
+  # Axes
+  # -------------------------------------------------
+  
+  scale_y_continuous(
+    
+    name = "Coverage",
+    
+    limits = c(0,1),
+    
+    sec.axis = sec_axis(
+      
+      transform = ~ . / scale_factor_price_mondrian,
+      
+      name = "Mean width (million DKK)",
+      
+      labels = label_number(scale = 1e-6)
+    )
+  ) +
+  
+  labs(
+    title = "Mondrian CP: coverage and width by price",
+    x = "Price interval (million DKK)",
+    color = NULL
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    
+    legend.position = "top",
+    
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    
+    axis.title.y.left = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.title.y.right = element_text(
+      color = "darkgreen"
+    ),
+    
+    axis.text.y.left = element_text(
+      color = "darkblue"
+    ),
+    
+    axis.text.y.right = element_text(
+      color = "darkgreen"
+    )
+  )
+
+p_mondrian_price
+
+# =====================================================
+# Combine plots
+# =====================================================
+
+p_mondrian_area | p_mondrian_price
