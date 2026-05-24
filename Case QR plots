@@ -1,0 +1,272 @@
+# =====================================================
+# Libraries
+# =====================================================
+
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+
+# =====================================================
+# Price bins
+# =====================================================
+
+breaks_price <- quantile(
+  qr_analysis_df$faktisk / 1e6,
+  probs = seq(0,1,length.out = 11),
+  na.rm = TRUE
+)
+
+qr_analysis_df <- qr_analysis_df %>%
+  mutate(
+    price_bin = cut(
+      faktisk / 1e6,
+      breaks = breaks_price,
+      include.lowest = TRUE
+    )
+  )
+
+# =====================================================
+# Helper function:
+# combined coverage + width plot
+# =====================================================
+
+make_combined_plot <- function(df,
+                               xvar,
+                               title,
+                               xlab = NULL,
+                               reorder_var = FALSE,
+                               rotate_x = FALSE,
+                               flip_coords = FALSE,
+                               ylim = c(0,1)) {
+  
+  # ---------------------------------------------------
+  # Summary dataframe
+  # ---------------------------------------------------
+  
+  plot_df <- df %>%
+    
+    group_by(.data[[xvar]]) %>%
+    
+    summarise(
+      coverage = mean(covered),
+      mean_width = mean(width),
+      .groups = "drop"
+    )
+  
+  # ---------------------------------------------------
+  # Ordering
+  # ---------------------------------------------------
+  
+  if(reorder_var){
+    
+    plot_df <- plot_df %>%
+      arrange(desc(coverage))
+    
+    plot_df[[xvar]] <-
+      factor(
+        plot_df[[xvar]],
+        levels = plot_df[[xvar]]
+      )
+  }
+  
+  # ---------------------------------------------------
+  # Scale factor
+  # ---------------------------------------------------
+  
+  scale_factor <-
+    max(plot_df$coverage) /
+    max(plot_df$mean_width)
+  
+  # ---------------------------------------------------
+  # Plot
+  # ---------------------------------------------------
+  
+  p <- ggplot() +
+    
+    # -----------------------------------------------
+    # Coverage
+    # -----------------------------------------------
+    
+    geom_line(
+      data = plot_df,
+      
+      aes(
+        x = .data[[xvar]],
+        y = coverage,
+        group = 1,
+        color = "Coverage"
+      ),
+      
+      linewidth = 0.8
+    ) +
+    
+    geom_point(
+      data = plot_df,
+      
+      aes(
+        x = .data[[xvar]],
+        y = coverage,
+        color = "Coverage"
+      ),
+      
+      size = 2
+    ) +
+    
+    geom_hline(
+      yintercept = 0.9,
+      color = "black",
+      linetype = "dashed"
+    ) +
+    
+    # -----------------------------------------------
+    # Width
+    # -----------------------------------------------
+    
+    geom_point(
+      data = plot_df,
+      
+      aes(
+        x = .data[[xvar]],
+        y = mean_width * scale_factor,
+        color = "Interval width"
+      ),
+      
+      size = 2
+    ) +
+    
+    # -----------------------------------------------
+    # Colors
+    # -----------------------------------------------
+    
+    scale_color_manual(
+      values = c(
+        "Coverage" = "darkblue",
+        "Interval width" = "darkgreen"
+      )
+    ) +
+    
+    # -----------------------------------------------
+    # Axes
+    # -----------------------------------------------
+    
+    scale_y_continuous(
+      
+      name = "Coverage",
+      
+      limits = ylim,
+      
+      sec.axis = sec_axis(
+        
+        transform = ~ . / scale_factor,
+        
+        name = "Mean width (million DKK)",
+        
+        labels = scales::label_number(
+          scale = 1e-6
+        )
+      )
+    ) +
+    
+    labs(
+      title = title,
+      x = xlab,
+      color = NULL
+    ) +
+    
+    theme_minimal() +
+    
+    theme(
+      
+      legend.position = "top",
+      
+      plot.title = element_text(
+        size = 11,
+        face = "bold"
+      ),
+      
+      axis.title = element_text(size = 10),
+      
+      axis.text = element_text(size = 8),
+      
+      axis.title.y.left = element_text(
+        color = "darkblue"
+      ),
+      
+      axis.title.y.right = element_text(
+        color = "darkgreen"
+      ),
+      
+      axis.text.y.left = element_text(
+        color = "darkblue"
+      ),
+      
+      axis.text.y.right = element_text(
+        color = "darkgreen"
+      )
+    )
+  
+  # ---------------------------------------------------
+  # Rotate x-axis
+  # ---------------------------------------------------
+  
+  if(rotate_x){
+    
+    p <- p +
+      theme(
+        axis.text.x = element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  }
+  
+  # ---------------------------------------------------
+  # Flip coordinates
+  # ---------------------------------------------------
+  
+  if(flip_coords){
+    
+    p <- p + coord_flip()
+  }
+  
+  return(p)
+}
+
+# =====================================================
+# QR combined plots
+# =====================================================
+
+p_qr_year <-
+  make_combined_plot(
+    qr_analysis_df,
+    "cph_salgsaar",
+    "QR: Sale year",
+    xlab = "Sale year"
+  )
+
+p_qr_price <-
+  make_combined_plot(
+    qr_analysis_df,
+    "price_bin",
+    "QR: Price bin",
+    xlab = "Price interval (million DKK)",
+    rotate_x = TRUE,
+    ylim = c(0.6,1.0)
+  )
+
+p_qr_area <-
+  make_combined_plot(
+    qr_analysis_df,
+    "KOMMUNE_NAVN",
+    "QR: Municipality",
+    reorder_var = TRUE,
+    flip_coords = TRUE,
+    ylim = c(0.6,1.0)
+  )
+
+# =====================================================
+# Combine plots
+# =====================================================
+
+p_qr_year | p_qr_price | p_qr_area
