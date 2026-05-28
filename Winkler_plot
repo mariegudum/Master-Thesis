@@ -1,0 +1,18 @@
+
+
+results_all_3 %>%
+  group_by(n, method) %>%
+  summarise(
+    mean_winkler = mean(winkler),
+    sd_winkler   = sd(winkler),
+    .groups = "drop"
+  ) %>%
+  ggplot(aes(x = n, y = mean_winkler, color = method)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10() +
+  labs(
+    title = "Winkler score vs sample size",
+    y = "Mean Winkler score"
+  ) +
+  theme_minimal()
